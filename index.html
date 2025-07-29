@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SyyyyncPlayer</title>
+  <link href="https://vjs.zencdn.net/8.3.0/video-js.css" rel="stylesheet" />
+  <script src="https://vjs.zencdn.net/8.3.0/video.min.js"></script>
+  <style>
+    #status {
+      margin-top: 10px;
+      font-weight: bold;
+      color: green;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+
+</head>
+<body>
+  <h2 style="text-align: center;font-family: '微软雅黑';">SyyyyncPlayer</h2>
+
+  <div id="video-container" class="hidden"></div>
+  <div id="status" style="text-align: center;font-family: '微软雅黑';">Welcome to use the SyyyyncPlayer</div>
+
+  <div id="url-input-container" style="text-align: center; margin-top: 20px;">
+    <input type="url", id="server-url", placeholder="Input Player Server URL" style="width: 300px; margin: 10px auto; display: block; text-align: center;" />
+    <button id="connect-btn" style="display: block; margin: 10px auto; padding: 10px 20px; font-size: 16px;">Connect to Server</button>
+  </div>
+
+  <input type="file" id="file-upload" class="hidden" accept="video/*" style="width: 300px; margin: 10px auto; display: block; text-align: center;" />
+  <br />
+  <div id="video-container" class="hidden">
+    
+  </div>
+  <div id="debug" style="text-align: center;font-family: 'Arial';"></div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const debugEl = document.getElementById('debug');
+    const Html5Tech = videojs.getTech('Html5');
+    let ws = null;
+    let player = null;
+
+    // file upload
+    const file_upload = document.getElementById('file-upload');
+    file_upload.addEventListener('change', (event) => {
+      const file = event.target.files[0];
+      if (file) {
+        const fileURL = URL.createObjectURL(file);
+        player.src({ type: file.type, src: fileURL });
+        player.load();
+        statusEl.textContent = 'status: 已加载新视频';
+        debugEl.textContent = `Loaded video: ${file.name}`;
+      } else {
+        statusEl.textContent = 'status: 未选择视频文件';
+        debugEl.textContent = '';
+      }
+    });
+    
+    class SyncTech extends Html5Tech {
+      constructor(options) {
+        super(options);
+        this._pendingPlay = null;
+        this._initSocket();
+        this.timer_offset = 0;
+        this.delay = parseInt(this.options_.dataSyncDelay, 10) || 500; // default 500ms
+      }
+      _initSocket() {
+        console.log('[SyncedHtml5] Initializing WebSocket connection');
+        ws.addEventListener('open', () => {
+          statusEl.textContent = 'Connection established';
+          this.init_time = Date.now();
+          ws.send(JSON.stringify({
+            action: 'timer_sync'
+          }));
+        });
+        ws.addEventListener('message', (event) => {
+          let msg = JSON.parse(event.data);
+          msg.effective_time = Date.now() + this.timer_offset;
+          console.log('[SyncedHtml5] Received message:', msg);
+          const { command, effective_time, needSync, currentTime } = msg;
+          statusEl.textContent = `status: execute ${command} after ${this.delay}ms`;
+          debugEl.textContent = `command: ${command}, effective_time: ${effective_time}, needSync: ${needSync}, currentTime: ${currentTime}`;
+
+          
+          if ( msg.action === 'sync_command' ) {
+            switch (msg.command) {
+              case 'play':
+                this._onPlay(msg);
+                break;
+              case 'pause':
+                this._onPause(msg);
+                break;
+              case 'seek':
+                this._onSeek(msg);
+                break;
+              case 'rate':
+                this._onRate(msg);
+                break;
+              default:
+                console.warn('Undefined command type:', msg);
+            }
+          }
+        });
+
+        ws.addEventListener('message', (event) => {
+          const msg = JSON.parse(event.data);
+          if (msg.action === 'timer_sync') {
+            // Handle timer sync action
+            console.log('[SyncedHtml5] Timer sync received:', msg);
+            const currentRealTime = Date.now();
+            const round_trip_time = currentRealTime - this.init_time;
+            const realtime = msg.realtime;
+            // Calculate the timer offset
+            this.timer_offset = realtime - (currentRealTime + round_trip_time / 2);
+            console.log('[SyncedHtml5] Timer offset:', this.timer_offset);
+          }
+        });
+      }
+
+      _onPlay(msg) {
+          const { effective_time, needSync, currentTime } = msg;
+          const now = Date.now();
+          const delay = effective_time - now;
+          if (needSync) {
+            super.currentTime(currentTime);
+          }
+          
+          setTimeout(() => {
+              const promise = super.play();
+              const pending = this._pendingPlay;
+
+              promise
+                .then(() => {
+                  if (pending !== null) pending.resolve();
+                  console.log('[SyncedHtml5] Play command executed successfully');
+                  statusEl.textContent = 'status: 已播放';
+                })
+                .catch((error) => {
+                  if (pending !== null) pending.reject(error);
+                  console.error('[SyncedHtml5] Play command failed:', error);
+                });
+              this._pendingPlay = null; // reset pending play
+
+          }, delay);
+      }
+
+      _onPause(msg) {
+        const { effective_time, currentTime } = msg;
+        const now = Date.now();
+        const delay = effective_time - now;
+        
+        console.log('[SyncedHtml5] Pausing and Sync video at:', currentTime);
+
+        super.setCurrentTime(currentTime);
+      
+        setTimeout(() => {
+          super.pause();
+          statusEl.textContent = '';//reset status text content
+        }, delay);
+      }
+
+      _onSeek(msg) {
+        console.log('[SyncedHtml5] Seeking to:', msg.currentTime);
+        const { effective_time, currentTime } = msg;
+        const now = Date.now();
+        const delay = effective_time - now;
+
+        setTimeout(() => {
+          super.setCurrentTime(currentTime);
+          statusEl.textContent = '';
+        }, delay);
+      }
+
+      _onRate(msg) {
+        console.log('[SyncedHtml5] Changing playback rate to:', msg.rate);
+        const { effective_time, rate } = msg;
+        const now = Date.now();
+        const delay = effective_time - now;
+
+        setTimeout(() => {
+          super.setPlaybackRate(rate);
+          statusEl.textContent = '';
+        }, delay);
+      }
+
+      // override original play method implementation
+      play() {
+        console.log('[SyncedHtml5] Attempting to play');
+        console.log(this._pendingPlay);
+        if (this._pendingPlay !== null) {
+          console.log('[SyncedHtml5] Play already requested, waiting for previous request to resolve');
+          return this._pendingPlay.promise;
+        }
+
+        if (this.seeking()) {
+          return super.play(); 
+        }
+        
+        console.log('[SyncedHtml5] Sending play-request');
+
+        const currentTime = super.currentTime();
+
+        console.log('[SyncedHtml5] Current time:', currentTime);
+        const currentRealTime = Date.now();
+
+        console.log('[SyncedHtml5] Current real time:', currentRealTime);
+        const msg = {
+          action: 'sync_request',
+          command: 'play',
+          currentTime: currentTime,
+          currentRealTime: currentRealTime
+        }; 
+
+        console.log('[SyncedHtml5] Created play request message:', msg);
+        let resolve, reject;
+        const promise = new Promise((res, rej) => {
+          resolve = res;
+          reject = rej;
+        });
+        console.log('[SyncedHtml5] Created pending play promise');
+
+        this._pendingPlay = { promise, resolve, reject };
+        ws.send(JSON.stringify(msg));
+        statusEl.textContent = `status: request for play`;
+        return promise;
+      }
+
+      // override original pasue method implementation
+      pause() {
+        if (this.seeking()) {
+          return super.pause(); 
+        }
+        console.log('[SyncedHtml5] Sending pause-request');
+        const msg = {
+          action: 'sync_request',
+          command: 'pause',
+          currentTime: super.currentTime(),
+          currentRealTime: Date.now()
+        };
+        
+        ws.send(JSON.stringify(msg));
+        statusEl.textContent = 'status: request for pause';
+      }
+
+      // override original currentTime method implementation
+      setCurrentTime(settime) {
+        if (settime !== undefined) {
+          console.log('[SyncedHtml5] Sending seek-request');
+          const msg = {
+            action: 'sync_request',
+            command: 'seek',
+            currentTime: settime,
+            currentRealTime: Date.now()
+          };
+          ws.send(JSON.stringify(msg));
+          statusEl.textContent = `status: request for seek`; 
+        }
+      }
+
+      setPlaybackRate(rate) {
+        if (rate !== undefined) {
+          console.log('[SyncedHtml5] Setting playback rate:', rate);
+          const msg = {
+            action: 'sync_request',
+            command: 'rate',
+            rate: rate,
+            currentRealTime: Date.now()
+          };
+          ws.send(JSON.stringify(msg));
+          statusEl.textContent = `status: request for playback rate change to ${rate}`;
+        }
+      }
+    };
+
+    videojs.registerTech('SyncTech', SyncTech);
+
+    // connect button
+    const connectBtn = document.getElementById('connect-btn');
+    connectBtn.addEventListener('click', () => {
+      const serverUrl = document.getElementById('server-url').value.trim();
+      
+      if (serverUrl) {
+        let normalizedUrl = serverUrl;
+        if (!/^wss?:\/\//i.test(normalizedUrl)) {
+          normalizedUrl = location.protocol === 'https:' ? `wss://${normalizedUrl}` : `ws://${normalizedUrl}`;
+        }
+
+        console.log('Connecting to server:', normalizedUrl);
+        
+        ws = new WebSocket(normalizedUrl);
+
+        const videoContainer = document.getElementById('video-container');
+        videoContainer.innerHTML = 
+        `<video
+          id="my-video"
+          class="video-js vjs-default-skin vjs-big-play-centered"
+          controls
+          preload="auto"
+          width="640"
+          height="264"
+          data-sync-delay="500"
+          data-setup='{"playbackRates": [0.5, 1, 1.5, 2]}'
+          style="margin: 0 auto; display: block; align-self: center;"
+        >
+        </video>`;
+
+        player = videojs('my-video', {
+          techOrder: ['SyncTech'],
+          playbackRates: [0.5, 1, 1.5, 2]
+        });
+
+        videoContainer.classList.remove('hidden');
+
+
+        const fileUpload = document.getElementById('file-upload');
+        fileUpload.classList.remove('hidden');
+
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = 'status: Connection established, Please select a video file to play';
+
+        const button_container = document.getElementById('url-input-container');
+        button_container.classList.add('hidden');
+      }
+    });
+    
+
+
+  </script>
+
+  
+</body>
+</html>
