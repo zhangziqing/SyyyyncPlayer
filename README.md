@@ -33,7 +33,7 @@ Open `index.html` in your browser and click the "Connect to Server" button. Sele
 If you need to use a separate WebSocket server, you can enter its address in the input box before clicking the button:
 ```bash
 localhost:8080
-# This will automatically be
+# The address will automatically be
 ```
 
 
