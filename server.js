@@ -2,8 +2,44 @@
 const WebSocket = require('ws');
 
 const REPL = require('repl');
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const { argv } = require('process');
 
-const wss = new WebSocket.Server({ port: 8080 });
+const PORT = argv[2] || 8080; 
+
+const PUBLIC_DIR = __dirname;
+
+const server = http.createServer((req, res) => {
+  let filePath = req.url === '/' ? '/index.html' : req.url;
+  filePath = path.join(PUBLIC_DIR, filePath);
+  const extname = path.extname(filePath).toLowerCase();
+
+  const mimeTypes = {
+    '.html': 'text/html',
+    '.js':   'application/javascript',
+    '.css':  'text/css',
+    '.json': 'application/json',
+    '.png':  'image/png',
+    '.jpg':  'image/jpeg',
+    '.wav':  'audio/wav',
+  };
+
+  fs.readFile(filePath, (err, content) => {
+    if (err) {
+      res.writeHead(404);
+      res.end('404 Not Found');
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': mimeTypes[extname] || 'application/octet-stream' });
+    res.end(content);
+  });
+});
+
+
+const wss = new WebSocket.Server({ server });
 
 let clients = [];
 
@@ -128,5 +164,8 @@ shell.context.info = function () {
   }
 }
 
+server.listen(PORT, () => {
+  console.log(`Server running at http://localhost:${PORT}`);
+});
 console.log('WebSocket server running on ws://localhost:8080');
 

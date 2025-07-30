@@ -5,6 +5,7 @@
   <title>SyyyyncPlayer</title>
   <link href="https://vjs.zencdn.net/8.3.0/video-js.css" rel="stylesheet" />
   <script src="https://vjs.zencdn.net/8.3.0/video.min.js"></script>
+  
   <style>
     #status {
       margin-top: 10px;
@@ -25,7 +26,7 @@
   <div id="status" style="text-align: center;font-family: '微软雅黑';">Welcome to use the SyyyyncPlayer</div>
 
   <div id="url-input-container" style="text-align: center; margin-top: 20px;">
-    <input type="url", id="server-url", placeholder="Input Player Server URL" style="width: 300px; margin: 10px auto; display: block; text-align: center;" />
+    <input type="url", id="server-url", placeholder="Use another player server URL?" style="width: 300px; margin: 10px auto; display: block; text-align: center;" />
     <button id="connect-btn" style="display: block; margin: 10px auto; padding: 10px 20px; font-size: 16px;">Connect to Server</button>
   </div>
 
@@ -282,48 +283,60 @@
     connectBtn.addEventListener('click', () => {
       const serverUrl = document.getElementById('server-url').value.trim();
       
+      let normalizedUrl = serverUrl;
+
       if (serverUrl) {
-        let normalizedUrl = serverUrl;
         if (!/^wss?:\/\//i.test(normalizedUrl)) {
           normalizedUrl = location.protocol === 'https:' ? `wss://${normalizedUrl}` : `ws://${normalizedUrl}`;
         }
-
-        console.log('Connecting to server:', normalizedUrl);
-        
-        ws = new WebSocket(normalizedUrl);
-
-        const videoContainer = document.getElementById('video-container');
-        videoContainer.innerHTML = 
-        `<video
-          id="my-video"
-          class="video-js vjs-default-skin vjs-big-play-centered"
-          controls
-          preload="auto"
-          width="640"
-          height="264"
-          data-sync-delay="500"
-          data-setup='{"playbackRates": [0.5, 1, 1.5, 2]}'
-          style="margin: 0 auto; display: block; align-self: center;"
-        >
-        </video>`;
-
-        player = videojs('my-video', {
-          techOrder: ['SyncTech'],
-          playbackRates: [0.5, 1, 1.5, 2]
-        });
-
-        videoContainer.classList.remove('hidden');
-
-
-        const fileUpload = document.getElementById('file-upload');
-        fileUpload.classList.remove('hidden');
-
-        const statusEl = document.getElementById('status');
-        statusEl.textContent = 'status: Connection established, Please select a video file to play';
-
-        const button_container = document.getElementById('url-input-container');
-        button_container.classList.add('hidden');
+      } else {
+        normalizedUrl = location.origin.replace(/^http/, 'ws');
       }
+
+      console.log('Connecting to server:', normalizedUrl);
+      
+      ws = new WebSocket(normalizedUrl);
+
+      const videoContainer = document.getElementById('video-container');
+      videoContainer.innerHTML = 
+      `<video
+        id="my-video"
+        class="video-js vjs-default-skin vjs-big-play-centered"
+        controls
+        preload="auto"
+        width="640"
+        height="264"
+        data-sync-delay="500"
+        data-setup='{"playbackRates": [0.5, 1, 1.5, 2]}'
+        style="margin: 0 auto; display: block; align-self: center;"
+      >
+      </video>`;
+
+      player = videojs('my-video', {
+        techOrder: ['SyncTech'],
+        playbackRates: [0.5, 1, 1.5, 2]
+      });
+
+      player.ready(() => {
+        player.hotkeys({
+          volumeStep: 0.1,
+          seekStep: 5,
+          enableModifiersForNumbers: false
+        });
+      });
+
+      videoContainer.classList.remove('hidden');
+
+
+      const fileUpload = document.getElementById('file-upload');
+      fileUpload.classList.remove('hidden');
+
+      const statusEl = document.getElementById('status');
+      statusEl.textContent = 'status: Connection established, Please select a video file to play';
+
+      const button_container = document.getElementById('url-input-container');
+      button_container.classList.add('hidden');
+      
     });
     
 
